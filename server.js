@@ -32,14 +32,13 @@ io.on("connection", (socket) => {
     io.to(room).emit("clients", count);
   });
 
-  // Binary audio messages
   socket.on("d", (payload) => {
     const room = rooms[socket.id];
     if (!room) return;
 
     socket.to(room).volatile.emit("d", {
       sid: socket.id,
-      a: payload.buf, // ArrayBuffer
+      a: payload.buf,
       s: payload.sampleRate,
       b: payload.bitDepth,
       p: payload.p || 1,
@@ -65,8 +64,8 @@ io.on("connection", (socket) => {
   });
 });
 
-// Railway will inject PORT dynamically
+// ✅ IMPORTANT: bind to Railway's provided PORT and 0.0.0.0
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[i] VoIP server is running on port ${PORT}`);
+  console.log(`[i] VoIP server running on port ${PORT}`);
 });
