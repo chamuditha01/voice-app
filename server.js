@@ -1,23 +1,30 @@
-// server.js
-const WebSocket = require("ws");
+const mediasoup = require('mediasoup');
+const io = require('socket.io')(3001);
 
-const wss = new WebSocket.Server({ port: 3001 });
+let worker, router, producerTransport, consumerTransport;
 
-wss.on("connection", (ws) => {
-  console.log("New client connected");
+(async () => {
+  worker = await mediasoup.createWorker();
+  router = await worker.createRouter({ mediaCodecs: [
+    { kind: 'audio', mimeType: 'audio/opus', clockRate: 48000, channels: 2 }
+  ]});
+})();
 
-  ws.on("message", (message) => {
-    // Broadcast audio chunks to all other clients
-    wss.clients.forEach((client) => {
-      if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
+io.on('connection', socket => {
+  socket.on('createTransport', async () => {
+    const transport = await router.createWebRtcTransport({ listenIps: ['0.0.0.0'], enableUdp: true, enableTcp: true });
+    socket.emit('transportCreated', {
+      id: transport.id,
+      iceParameters: transport.iceParameters,
+      dtlsParameters: transport.dtlsParameters
     });
   });
 
-  ws.on("close", () => {
-    console.log("Client disconnected");
+  socket.on('connectTransport', async (dtlsParameters) => {
+    await producerTransport.connect({ dtlsParameters });
+  });
+
+  socket.on('produce', async (kind, rtpParameters) => {
+    await producerTransport.produce({ kind, rtpParameters });
   });
 });
-
-console.log("WebSocket server running on ws://localhost:3001");
