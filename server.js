@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const http = require("http");
 const path = require("path");
@@ -10,16 +9,15 @@ const server = http.createServer(app);
 // Serve static frontend from /public
 app.use(express.static(path.join(__dirname, "public")));
 
-// Simple health
+// Health check
 app.get("/health", (req, res) => res.send("OK"));
 
 // Socket.IO (binary-friendly)
 const io = new Server(server, {
   cors: { origin: "*" },
-  maxHttpBufferSize: 1e6 // 1MB (adjust if necessary)
+  maxHttpBufferSize: 1e6, // 1MB
 });
 
-// Rooms map for tracking
 const rooms = {};
 
 io.on("connection", (socket) => {
@@ -29,23 +27,22 @@ io.on("connection", (socket) => {
     socket.join(room);
     rooms[socket.id] = room;
     console.log(`${socket.id} joined ${room}`);
-    // update count
+
     const count = io.sockets.adapter.rooms.get(room)?.size || 0;
     io.to(room).emit("clients", count);
   });
 
-  // Binary audio message handler
-  // payload: { buf: ArrayBuffer, sampleRate: number, bitDepth: number }
+  // Binary audio messages
   socket.on("d", (payload) => {
     const room = rooms[socket.id];
     if (!room) return;
-    // broadcast to others in room (volatile similar to UDP)
+
     socket.to(room).volatile.emit("d", {
       sid: socket.id,
-      a: payload.buf,       // ArrayBuffer (binary)
+      a: payload.buf, // ArrayBuffer
       s: payload.sampleRate,
       b: payload.bitDepth,
-      p: payload.p || 1
+      p: payload.p || 1,
     });
   });
 
@@ -68,5 +65,8 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Railway will inject PORT dynamically
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`[i] VoIP server is running on port ${PORT}`);
+});
