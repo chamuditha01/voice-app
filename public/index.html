@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Simple VOIP Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 20px; }
+    button { margin: 6px; padding: 10px 14px; }
+    #clients { margin-top:10px; }
+  </style>
+</head>
+<body>
+  <h1>Simple VOIP Demo (WebSocket + Worker)</h1>
+  <div>
+    <label>Room: <input id="room" value="main" /></label>
+    <button id="join">Join</button>
+    <button id="leave" disabled>Leave</button>
+    <button id="talk" disabled>Start Talking</button>
+    <button id="stopTalking" disabled>Stop Talking</button>
+  </div>
+
+  <div id="clients">Not connected</div>
+
+  <h3>Local</h3>
+  <audio id="localAudio" autoplay muted></audio>
+
+  <h3>Remote</h3>
+  <div id="remotes"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

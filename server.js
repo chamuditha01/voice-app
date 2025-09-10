@@ -1,78 +1,72 @@
+// server.js
 const express = require("express");
 const http = require("http");
-const cors = require("cors");
-const mediasoup = require("mediasoup");
-const socketIo = require("socket.io");
+const path = require("path");
+const { Server } = require("socket.io");
 
 const app = express();
-app.use(cors());
-app.use(express.json());
-
 const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: "*" } });
 
-let worker, router;
-let transports = {}; // store send/recv transports per socket
-let producers = {};  // store producers per socket
+// Serve static frontend from /public
+app.use(express.static(path.join(__dirname, "public")));
 
-(async () => {
-  worker = await mediasoup.createWorker();
-  router = await worker.createRouter({
-    mediaCodecs: [
-      { kind: "audio", mimeType: "audio/opus", clockRate: 48000, channels: 2 }
-    ]
-  });
-})();
+// Simple health
+app.get("/health", (req, res) => res.send("OK"));
 
-// -------------------- HTTP Endpoints --------------------
-
-// 1️⃣ Get RTP Capabilities
-app.get("/rtpCapabilities", async (req, res) => {
-  res.json(router.rtpCapabilities);
+// Socket.IO (binary-friendly)
+const io = new Server(server, {
+  cors: { origin: "*" },
+  maxHttpBufferSize: 1e6 // 1MB (adjust if necessary)
 });
 
-// 2️⃣ Create Send Transport
-app.post("/createWebRtcTransport", async (req, res) => {
-  const transport = await router.createWebRtcTransport({
-    listenIps: ["0.0.0.0"],
-    enableUdp: true,
-    enableTcp: true
-  });
+// Rooms map for tracking
+const rooms = {};
 
-  transports[req.body.socketId] = { sendTransport: transport };
-  res.json({
-    id: transport.id,
-    iceParameters: transport.iceParameters,
-    iceCandidates: transport.iceCandidates,
-    dtlsParameters: transport.dtlsParameters
-  });
-});
-
-// 3️⃣ Connect Transport
-app.post("/connectTransport", async (req, res) => {
-  const transport = transports[req.body.socketId].sendTransport;
-  await transport.connect({ dtlsParameters: req.body.dtlsParameters });
-  res.sendStatus(200);
-});
-
-// 4️⃣ Produce
-app.post("/produce", async (req, res) => {
-  const transport = transports[req.body.socketId].sendTransport;
-  const producer = await transport.produce({ kind: req.body.kind, rtpParameters: req.body.rtpParameters });
-  producers[req.body.socketId] = producer;
-
-  // notify all other sockets about new producer
-  socketIo.emit("new-producer", req.body.socketId);
-
-  res.json({ id: producer.id });
-});
-
-// -------------------- Socket.IO --------------------
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
+
+  socket.on("join", (room) => {
+    socket.join(room);
+    rooms[socket.id] = room;
+    console.log(`${socket.id} joined ${room}`);
+    // update count
+    const count = io.sockets.adapter.rooms.get(room)?.size || 0;
+    io.to(room).emit("clients", count);
+  });
+
+  // Binary audio message handler
+  // payload: { buf: ArrayBuffer, sampleRate: number, bitDepth: number }
+  socket.on("d", (payload) => {
+    const room = rooms[socket.id];
+    if (!room) return;
+    // broadcast to others in room (volatile similar to UDP)
+    socket.to(room).volatile.emit("d", {
+      sid: socket.id,
+      a: payload.buf,       // ArrayBuffer (binary)
+      s: payload.sampleRate,
+      b: payload.bitDepth,
+      p: payload.p || 1
+    });
+  });
+
+  socket.on("leave", () => {
+    const room = rooms[socket.id];
+    if (room) {
+      socket.leave(room);
+      delete rooms[socket.id];
+    }
+  });
+
   socket.on("disconnect", () => {
+    const room = rooms[socket.id];
+    if (room) {
+      const count = io.sockets.adapter.rooms.get(room)?.size || 0;
+      io.to(room).emit("clients", count);
+    }
+    delete rooms[socket.id];
     console.log("Client disconnected:", socket.id);
   });
 });
 
-server.listen(3001, () => console.log("Server running on port 3001"));
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
