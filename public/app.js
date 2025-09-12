@@ -106,18 +106,35 @@ async function startTalking() {
   soundcardSampleRate = ctx.sampleRate;
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Request mic with WebRTC audio processing enabled
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000
+      }
+    });
+
     localAudioEl.srcObject = localStream;
     localAudioEl.muted = true;
 
+    // Create Web Audio chain
     const source = ctx.createMediaStreamSource(localStream);
+
+    // Add a high-pass filter to cut low-frequency noise (rumble, fan, mic bumps)
+    const highpass = ctx.createBiquadFilter();
+    highpass.type = "highpass";
+    highpass.frequency.value = 200; // cut below 200Hz
+
+    // ScriptProcessor to grab audio frames
     const node = ctx.createScriptProcessor(chunkSize, 1, 1);
 
     const minGain = 0.001; // simple VAD threshold
 
     node.onaudioprocess = (e) => {
       const inData = e.inputBuffer.getChannelData(0);
-      // copy float32 into transferable (worker will resample/encode)
       const f32 = new Float32Array(inData.length);
       f32.set(inData);
       worker.postMessage({
@@ -131,7 +148,9 @@ async function startTalking() {
       }, [f32.buffer]);
     };
 
-    source.connect(node);
+    // Connect chain: mic → highpass → processor
+    source.connect(highpass);
+    highpass.connect(node);
     node.connect(ctx.destination);
 
     document.getElementById('talk').disabled = true;
@@ -141,6 +160,7 @@ async function startTalking() {
     alert("Microphone access required.");
   }
 }
+
 
 function stopTalking() {
   if (localStream) {

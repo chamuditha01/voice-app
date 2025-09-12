@@ -9,6 +9,7 @@ const server = http.createServer(app);
 // Serve static frontend from /public
 app.use(express.static(path.join(__dirname, "public")));
 
+
 // Health check
 app.get("/health", (req, res) => res.send("OK"));
 
