@@ -4,43 +4,56 @@ const PORT = process.env.PORT || 8080;
 
 const wss = new WebSocket.Server({ port: PORT });
 
-let clients = []; // Array to hold connected clients
+let clients = new Map(); // Use a Map for O(1) lookups by ID
+let idCounter = 0;
+
+function broadcastUserList() {
+    const users = Array.from(clients.values()).map(client => client.id);
+    const message = JSON.stringify({ type: 'user_list', users });
+    
+    clients.forEach(client => {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(message);
+        }
+    });
+}
 
 wss.on('connection', ws => {
-    if (clients.length < 2) {
-        const id = clients.length;
-        ws.id = id;
-        clients.push(ws);
-        console.log(`New client connected with ID: ${id}`);
-        ws.send(JSON.stringify({ type: 'id', id: id }));
-        
-        // Removed the line that automatically started the call.
-        // The call is now initiated by a client-side request.
-    } else {
-        console.log('Server is full. New connection rejected.');
-        ws.close();
-        return;
-    }
+    const id = idCounter++;
+    clients.set(id, { ws, id });
+
+    console.log(`New client connected with ID: ${id}`);
+    
+    // Send the new client their ID and the current list of users
+    ws.send(JSON.stringify({ type: 'your_id', id: id }));
+    
+    // Broadcast the updated user list to all connected clients
+    broadcastUserList();
 
     ws.on('message', message => {
         try {
             const data = JSON.parse(message);
-            const otherClient = clients.find(client => client.id !== ws.id);
             
-            if (otherClient) {
-                // Forward the message to the other client
-                otherClient.send(JSON.stringify(data));
+            // Messages must now include a targetId
+            const targetClient = clients.get(data.targetId);
+            
+            if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+                // Add the sender's ID to the message before forwarding
+                data.senderId = id;
+                targetClient.ws.send(JSON.stringify(data));
             } else {
-                console.log('Peer not found. Waiting for another client to connect.');
+                console.log(`Target client ${data.targetId} not found or not ready.`);
             }
         } catch (error) {
-            console.error('Invalid message format:', error);
+            console.error('Invalid message format or forwarding error:', error);
         }
     });
 
     ws.on('close', () => {
-        console.log(`Client disconnected: ${ws.id}`);
-        clients = clients.filter(client => client.id !== ws.id);
+        console.log(`Client disconnected: ${id}`);
+        clients.delete(id);
+        // Broadcast the updated user list
+        broadcastUserList();
     });
 });
 
