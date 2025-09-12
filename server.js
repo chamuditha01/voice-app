@@ -1,72 +1,52 @@
-const express = require("express");
-const http = require("http");
-const path = require("path");
-const { Server } = require("socket.io");
+const WebSocket = require('ws');
 
-const app = express();
-const server = http.createServer(app);
-
-// Serve static frontend from /public
-app.use(express.static(path.join(__dirname, "public")));
-
-
-// Health check
-app.get("/health", (req, res) => res.send("OK"));
-
-// Socket.IO (binary-friendly)
-const io = new Server(server, {
-  cors: { origin: "*" },
-  maxHttpBufferSize: 1e6, // 1MB
-});
-
-const rooms = {};
-
-io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
-
-  socket.on("join", (room) => {
-    socket.join(room);
-    rooms[socket.id] = room;
-    console.log(`${socket.id} joined ${room}`);
-
-    const count = io.sockets.adapter.rooms.get(room)?.size || 0;
-    io.to(room).emit("clients", count);
-  });
-
-  socket.on("d", (payload) => {
-    const room = rooms[socket.id];
-    if (!room) return;
-
-    socket.to(room).volatile.emit("d", {
-      sid: socket.id,
-      a: payload.buf,
-      s: payload.sampleRate,
-      b: payload.bitDepth,
-      p: payload.p || 1,
-    });
-  });
-
-  socket.on("leave", () => {
-    const room = rooms[socket.id];
-    if (room) {
-      socket.leave(room);
-      delete rooms[socket.id];
-    }
-  });
-
-  socket.on("disconnect", () => {
-    const room = rooms[socket.id];
-    if (room) {
-      const count = io.sockets.adapter.rooms.get(room)?.size || 0;
-      io.to(room).emit("clients", count);
-    }
-    delete rooms[socket.id];
-    console.log("Client disconnected:", socket.id);
-  });
-});
-
-// ✅ IMPORTANT: bind to Railway's provided PORT and 0.0.0.0
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[i] VoIP server running on port ${PORT}`);
+
+const wss = new WebSocket.Server({ port: PORT });
+
+let clients = []; // Array to hold connected clients
+
+wss.on('connection', ws => {
+    // A new client connects. If we have less than 2 clients, add them.
+    if (clients.length < 2) {
+        const id = clients.length;
+        ws.id = id;
+        clients.push(ws);
+        console.log(`New client connected with ID: ${id}`);
+        ws.send(JSON.stringify({ type: 'id', id: id }));
+        
+        // If two clients are now connected, send a "start" signal to the second client
+        if (clients.length === 2) {
+            clients[1].send(JSON.stringify({ type: 'start_call' }));
+        }
+    } else {
+        // If there are already two clients, close the new connection
+        console.log('Server is full. New connection rejected.');
+        ws.close();
+        return;
+    }
+
+    ws.on('message', message => {
+        try {
+            const data = JSON.parse(message);
+            const otherClient = clients.find(client => client.id !== ws.id);
+            
+            if (otherClient) {
+                // Forward the message to the other client
+                otherClient.send(JSON.stringify(data));
+            } else {
+                console.log('Peer not found. Waiting for another client to connect.');
+            }
+        } catch (error) {
+            console.error('Invalid message format:', error);
+        }
+    });
+
+    ws.on('close', () => {
+        console.log(`Client disconnected: ${ws.id}`);
+        // Remove the disconnected client
+        clients = clients.filter(client => client.id !== ws.id);
+    });
 });
+
+console.log(`Signaling server listening on port ${PORT}`);

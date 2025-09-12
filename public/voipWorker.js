@@ -1,8 +1,5 @@
 // public/voipWorker.js
-// Simple worker: down/up sample + convert float32 <-> int16
-// messages:
-// { inc: false, inData: Float32Array, inSampleRate, outSampleRate, outBitDepth, outChunkSize }
-// { inc: true, inDataBuf: ArrayBuffer, inSampleRate, outSampleRate, inBitDepth, outChunkSize, p }
+// Handles audio resampling + int16 <-> float32 conversion
 
 function floatTo16BitPCM(float32Array) {
   const l = float32Array.length;
@@ -26,7 +23,7 @@ function int16ToFloat32Buffer(ab) {
   return out;
 }
 
-// very simple linear resample (not high quality, but OK for demo)
+// linear resampling
 function resampleLinear(src, srcRate, dstRate) {
   if (srcRate === dstRate) return src;
   const ratio = srcRate / dstRate;
@@ -45,39 +42,40 @@ function resampleLinear(src, srcRate, dstRate) {
 self.addEventListener('message', (e) => {
   const d = e.data;
   if (d.inc) {
-    // incoming audio from server: ArrayBuffer with int16 (bitDepth 16) usually
-    const inBuf = d.inDataBuf;
-    const inBit = d.inBitDepth || 16;
-    let floatIn;
-    if (inBit === 16) {
-      floatIn = int16ToFloat32Buffer(inBuf);
-    } else {
-      // fallback: assume Float32
-      floatIn = new Float32Array(inBuf);
-    }
-    // resample to outSampleRate (soundcard)
+    // === Incoming audio from server ===
+    let floatIn = d.inBitDepth === 16
+      ? int16ToFloat32Buffer(d.inDataBuf)
+      : new Float32Array(d.inDataBuf);
+
     const out = resampleLinear(floatIn, d.inSampleRate, d.outSampleRate);
-    // apply simple scaling if p provided (normalization)
+
+    // normalize if p provided
     if (d.p) {
-      for (let i=0;i<out.length;i++) out[i] = out[i] / d.p;
+      const gain = 1 / d.p;
+      for (let i = 0; i < out.length; i++) out[i] *= gain;
     }
-    // send back Float32Array buffer
-    self.postMessage({ kind: 'inc', sid: d.sid, buffer: out.buffer }, [out.buffer]);
+
+    // return as transferable buffer
+    self.postMessage(
+      { kind: 'inc', sid: d.sid, buffer: out.buffer },
+      [out.buffer]
+    );
+
   } else {
-    // outgoing mic data: Float32Array in inData
-    const floatIn = d.inData;
-    const resampled = resampleLinear(floatIn, d.inSampleRate, d.outSampleRate);
-    // optionally remove silence: quick VAD
+    // === Outgoing mic data ===
+    const resampled = resampleLinear(d.inData, d.inSampleRate, d.outSampleRate);
+
+    // quick silence detection
     let energy = 0;
     for (let i = 0; i < resampled.length; i++) energy += Math.abs(resampled[i]);
     const mean = energy / resampled.length;
+
     if (mean < (d.minGain || 0.0005)) {
-      // silence -> send null
       self.postMessage({ kind: 'silent' });
       return;
     }
-    // convert to int16 and return ArrayBuffer
+
     const ab = floatTo16BitPCM(resampled);
-    self.postMessage({ kind: 'out', buffer: ab, p: 1 }, [ab]);
+    self.postMessage({ kind: 'out', buffer: ab, p: mean }, [ab]);
   }
 });

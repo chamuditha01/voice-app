@@ -4,29 +4,79 @@
   <meta charset="utf-8" />
   <title>Simple VOIP Demo</title>
   <style>
-    body { font-family: system-ui, sans-serif; padding: 20px; }
-    button { margin: 6px; padding: 10px 14px; }
-    #clients { margin-top:10px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f6fa; color: #333; padding: 20px; }
+    h1 { text-align: center; margin-bottom: 30px; color: #2f3640; }
+    .container { max-width: 800px; margin: 0 auto; }
+    .card { background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); margin-bottom: 30px; transition: 0.3s; }
+    .card:hover { box-shadow: 0 10px 25px rgba(0,0,0,0.12); }
+    input, select { width: 100%; padding: 10px 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #ccc; font-size: 16px; }
+    button { padding: 12px 20px; margin: 6px 4px; border: none; border-radius: 8px; background-color: #4cd137; color: white; font-size: 16px; cursor: pointer; transition: 0.2s; position: relative; }
+    button:hover:not(:disabled) { background-color: #44bd32; }
+    button:disabled { background-color: #7f8fa6; cursor: not-allowed; }
+    #clients { margin-top: 10px; padding: 10px; background: #f1f2f6; border-radius: 8px; min-height: 30px; }
+    audio { width: 100%; margin-top: 10px; border-radius: 8px; outline: none; background: #dcdde1; }
+    #remotes { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    #remotes audio { width: 100%; max-width: 350px; }
+    @media (max-width: 500px) { button { width: 100%; } #remotes audio { max-width: 100%; } }
+    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #4cd137; border-radius: 50%; width: 18px; height: 18px; animation: spin 1s linear infinite; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: none; }
+    @keyframes spin { 0% { transform: translateY(-50%) rotate(0deg); } 100% { transform: translateY(-50%) rotate(360deg); } }
   </style>
 </head>
 <body>
-  <h1>Simple VOIP Demo (WebSocket + Worker)</h1>
-  <div>
-    <label>Room: <input id="room" value="main" /></label>
-    <button id="join">Join</button>
-    <button id="leave" disabled>Leave</button>
-    <button id="talk" disabled>Start Talking</button>
-    <button id="stopTalking" disabled>Stop Talking</button>
+  <h1>Simple VOIP Demo</h1>
+  <div class="container">
+
+    <!-- Auth Section -->
+    <div class="card" id="authSection">
+      <h3>Login / Signup</h3>
+      <input id="email" type="email" placeholder="Email" />
+      <input id="password" type="password" placeholder="Password" />
+      <select id="role">
+        <option value="learner">Learner</option>
+        <option value="speaker">Speaker</option>
+      </select>
+      <div style="margin-top:10px;">
+        <button id="signup">Sign Up <div class="spinner" id="signupSpinner"></div></button>
+        <button id="login">Login <div class="spinner" id="loginSpinner"></div></button>
+      </div>
+    </div>
+
+    <!-- Call Section -->
+    <div id="callSection" class="card" style="display:none;">
+
+      <!-- Learner Dashboard -->
+      <div id="learnerDashboard" style="display:none;">
+        <h3>Learner Dashboard</h3>
+      </div>
+
+      <!-- Speaker Dashboard -->
+      <div id="speakerDashboard" style="display:none;">
+        <h3>Speaker Dashboard</h3>
+      </div>
+
+      <!-- Common Controls -->
+      <div>
+        <label>Room:</label>
+        <input id="room" value="main" />
+      </div>
+      <div style="margin-top:10px;">
+        <button id="join">Join</button>
+        <button id="leave" disabled>Leave</button>
+        <button id="talk">Start Talking</button>
+        <button id="stopTalking" disabled>Stop Talking</button>
+        <button id="logout">Logout</button>
+      </div>
+      <div id="clients">Not connected</div>
+      <h3>Local</h3>
+      <audio id="localAudio" autoplay muted></audio>
+      <h3>Remote</h3>
+      <div id="remotes"></div>
+    </div>
+
   </div>
 
-  <div id="clients">Not connected</div>
-
-  <h3>Local</h3>
-  <audio id="localAudio" autoplay muted></audio>
-
-  <h3>Remote</h3>
-  <div id="remotes"></div>
-
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.1/dist/umd/supabase.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
 </body>

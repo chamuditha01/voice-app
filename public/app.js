@@ -8,9 +8,85 @@ const chunkSize = 1024;
 const outSampleRate = 16000; // send at 16kHz
 const outBitDepth = 16;
 
+
+// ================== AUTH SECTION ================== //
+const signupBtn = document.getElementById("signup");
+const loginBtn = document.getElementById("login");
+const authSection = document.getElementById("authSection");
+const callSection = document.getElementById("callSection");
+
+const learnerDashboard = document.getElementById("learnerDashboard");
+const speakerDashboard = document.getElementById("speakerDashboard");
+
+// Helper: toggle dashboard
+function showDashboard(role) {
+  callSection.style.display = "block";
+  if (role === "learner") {
+    learnerDashboard.style.display = "block";
+    speakerDashboard.style.display = "none";
+  } else if (role === "speaker") {
+    speakerDashboard.style.display = "block";
+    learnerDashboard.style.display = "none";
+  }
+}
+
+// ================== SIGNUP ================== //
+signupBtn.onclick = async () => {
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+  const role = document.getElementById("role").value;
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { role } }
+  });
+
+  if (error) alert("Signup error: " + error.message);
+  else alert("Signup successful! Check email to confirm.");
+};
+
+// ================== LOGIN ================== //
+loginBtn.onclick = async () => {
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+  if (error) alert("Login error: " + error.message);
+  else {
+    const { user } = data;
+    const role = user.user_metadata.role || "learner";
+    alert(`Welcome ${user.email} (${role})`);
+    authSection.style.display = "none";
+    showDashboard(role);
+  }
+};
+
+// ================== KEEP SESSION ================== //
+supabase.auth.getSession().then(({ data }) => {
+  if (data.session) {
+    const user = data.session.user;
+    const role = user.user_metadata.role || "learner";
+    authSection.style.display = "none";
+    showDashboard(role);
+  }
+});
+
+
+document.getElementById('logout').onclick = async () => {
+  await supabase.auth.signOut();
+  // Hide call section, show auth
+  document.getElementById('callSection').style.display = 'none';
+  document.getElementById('authSection').style.display = 'block';
+};
+
+
+
 const localAudioEl = document.getElementById('localAudio');
 const remotesDiv = document.getElementById('remotes');
 const clientsEl = document.getElementById('clients');
+
 
 document.getElementById('join').onclick = async () => {
   room = document.getElementById('room').value || 'main';
