@@ -4,28 +4,22 @@ const PORT = process.env.PORT || 8080;
 
 const wss = new WebSocket.Server({ port: PORT });
 
-// Use a Map to store client information for efficient lookup
 let clients = new Map();
 let idCounter = 0;
+let ongoingCalls = new Map(); // Use a Map to store call pairs
 
-/**
- * Broadcasts the updated list of users to all connected clients.
- * It filters out any users whose role and email haven't been set yet.
- */
 function broadcastUserList() {
-    // Create a list of user objects with their ID, email, and role
     const users = Array.from(clients.values())
         .map(client => ({
             id: client.id,
             email: client.email,
             role: client.role,
+            inCall: ongoingCalls.has(client.id) // Check if the user is a key in the map
         }))
-        // Only include users with complete info in the broadcast list
-        .filter(user => user.email && user.role); 
+        .filter(user => user.email && user.role);
 
     const message = JSON.stringify({ type: 'user_list', users });
 
-    // Send the user list to every client
     clients.forEach(client => {
         if (client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(message);
@@ -33,42 +27,79 @@ function broadcastUserList() {
     });
 }
 
-// Event listener for new client connections
+function findRandomAvailableSpeaker() {
+    const speakers = Array.from(clients.values()).filter(client =>
+        client.role === 'speaker' && !ongoingCalls.has(client.id)
+    );
+    if (speakers.length > 0) {
+        const randomIndex = Math.floor(Math.random() * speakers.length);
+        return speakers[randomIndex];
+    }
+    return null;
+}
+
 wss.on('connection', ws => {
-    // Assign a unique ID to the new client
     const id = idCounter++;
-    clients.set(id, { ws, id, email: null, role: null }); // Initialize with null info
+    clients.set(id, { ws, id, email: null, role: null });
 
     console.log(`New client connected with ID: ${id}`);
     
-    // Immediately send the new client their assigned ID
     ws.send(JSON.stringify({ type: 'your_id', id: id }));
 
-    // Event listener for messages from this client
     ws.on('message', message => {
         try {
             const data = JSON.parse(message);
-
+            
             if (data.type === 'user_info') {
-                // Update the client's info in our Map
                 const client = clients.get(id);
                 if (client) {
                     client.email = data.email;
                     client.role = data.role;
                 }
-                // Now that the client's info is complete, broadcast the updated user list.
                 broadcastUserList();
-            } else {
-                // For all other messages (SDP, ICE, call requests, etc.), forward them
-                // to the target client specified in the message.
+            } else if (data.type === 'call_request') {
+                const speaker = findRandomAvailableSpeaker();
+                if (speaker) {
+                    data.senderId = id;
+                    data.targetId = speaker.id;
+                    speaker.ws.send(JSON.stringify(data));
+                    
+                    // Mark both users as in a call
+                    ongoingCalls.set(id, speaker.id);
+                    ongoingCalls.set(speaker.id, id);
+                    
+                    broadcastUserList();
+                } else {
+                    ws.send(JSON.stringify({ type: 'no_speaker_available' }));
+                }
+            } else if (data.type === 'call_accepted') {
                 const targetClient = clients.get(data.targetId);
-                
                 if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-                    // Add the sender's ID before forwarding for the recipient's context
                     data.senderId = id;
                     targetClient.ws.send(JSON.stringify(data));
-                } else {
-                    console.log(`Target client ${data.targetId} not found or not ready.`);
+                }
+            } else if (data.type === 'call_ended') {
+                const partnerId = ongoingCalls.get(id);
+
+                // Remove both users from the ongoingCalls map
+                if (partnerId) {
+                    ongoingCalls.delete(id);
+                    ongoingCalls.delete(partnerId);
+                }
+                
+                // Broadcast the updated user list to all clients
+                broadcastUserList();
+
+                // Inform the other client that the call has ended
+                const targetClient = clients.get(partnerId);
+                if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+                    targetClient.ws.send(JSON.stringify({ type: 'call_ended', senderId: id }));
+                }
+            } else {
+                const targetClient = clients.get(data.targetId);
+                if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+                    data.senderId = id;
+                    targetClient.ws.send(JSON.stringify(data));
                 }
             }
         } catch (error) {
@@ -76,11 +107,15 @@ wss.on('connection', ws => {
         }
     });
 
-    // Event listener for a client disconnecting
     ws.on('close', () => {
         console.log(`Client disconnected: ${id}`);
+        // Clean up the call status for the disconnected user
+        const partnerId = ongoingCalls.get(id);
+        if (partnerId) {
+            ongoingCalls.delete(id);
+            ongoingCalls.delete(partnerId);
+        }
         clients.delete(id);
-        // Broadcast the updated user list to reflect the user's departure
         broadcastUserList();
     });
 });
