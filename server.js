@@ -1,12 +1,13 @@
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
+const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 8080;
 
-// Supabase configuration (replace with your actual credentials)
-const SUPABASE_URL = 'https://kzoacsovknswqolrpbeb.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6b2Fjc292a25zd3FvbHJwYmViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczMjA0MjksImV4cCI6MjA3Mjg5NjQyOX0.NKKqML6aHUe4_euUX4x9p6TcTWIfKWeeVn_PQ_pS_o4';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseUrl = "https://kzoacsovknswqolrpbeb.supabase.co";
+const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6b2Fjc292a25zd3FvbHJwYmViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczMjA0MjksImV4cCI6MjA3Mjg5NjQyOX0.NKKqML6aHUe4_euUX4x9p6TcTWIfKWeeVn_PQ_pS_o4";
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const wss = new WebSocket.Server({ port: PORT });
 let clients = new Map();
@@ -64,9 +65,15 @@ wss.on('connection', ws => {
             } else if (data.type === 'call_request') {
                 const speaker = findRandomAvailableSpeaker();
                 if (speaker) {
-                    data.senderId = id;
-                    data.targetId = speaker.id;
-                    speaker.ws.send(JSON.stringify(data));
+                    const tempCallId = uuidv4();
+                    
+                    const learner = clients.get(id);
+                    const speakerEmail = speaker.email;
+                    const learnerEmail = learner.email;
+                    
+                    ws.send(JSON.stringify({ type: 'call_accepted', senderId: speaker.id, callId: tempCallId, opponentEmail: speakerEmail }));
+                    speaker.ws.send(JSON.stringify({ type: 'call_request', senderId: id, callId: tempCallId, opponentEmail: learnerEmail }));
+                    
                     ongoingCalls.set(id, speaker.id);
                     ongoingCalls.set(speaker.id, id);
                     broadcastUserList();
@@ -75,42 +82,95 @@ wss.on('connection', ws => {
                 }
             } else if (data.type === 'call_accepted') {
                 const targetClient = clients.get(data.targetId);
-                if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-                    data.senderId = id;
-                    targetClient.ws.send(JSON.stringify(data));
-                }
-            } else if (data.type === 'call_ended') {
-                const partnerId = ongoingCalls.get(id);
+                const senderClient = clients.get(id);
 
+                if (targetClient && targetClient.ws.readyState === WebSocket.OPEN && senderClient) {
+                    data.senderId = id;
+                    delete data.opponentEmail;
+                    targetClient.ws.send(JSON.stringify(data));
+                    
+                    senderClient.ws.send(JSON.stringify({ type: 'call_started' }));
+                    targetClient.ws.send(JSON.stringify({ type: 'call_started' }));
+                }
+            } else if (data.type === 'call_rejected') {
+                const targetClient = clients.get(data.targetId);
+                if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+                    targetClient.ws.send(JSON.stringify({ type: 'call_rejected' }));
+                }
+                const partnerId = ongoingCalls.get(id);
                 if (partnerId) {
                     ongoingCalls.delete(id);
                     ongoingCalls.delete(partnerId);
                 }
-                
                 broadcastUserList();
+            } else if (data.type === 'call_ended') {
+                const partnerId = ongoingCalls.get(id);
+                const callerClient = clients.get(id);
+                const partnerClient = clients.get(partnerId);
 
-                const targetClient = clients.get(partnerId);
-                if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-                    targetClient.ws.send(JSON.stringify({ type: 'call_ended' }));
+                // Immediately notify both clients that the call has ended
+                if (callerClient && callerClient.ws.readyState === WebSocket.OPEN) {
+                    callerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
                 }
-            } else if (data.type === 'submit_call_data') {
-                // Handle database submission
-                const { error } = await supabase
+                if (partnerClient && partnerClient.ws.readyState === WebSocket.OPEN) {
+                    partnerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
+                }
+
+                // Database submission logic
+                const { learner_email, speaker_email, duration, startTime, endTime } = data;
+                
+                const { data: insertedData, error } = await supabase
                     .from('calls')
                     .insert([
                         {
-                            learner_email: data.learner_email,
-                            speaker_email: data.speaker_email,
-                            duration_seconds: data.duration,
-                            start_time: data.startTime,
-                            end_time: data.endTime,
+                            learner_email,
+                            speaker_email,
+                            duration_seconds: duration,
+                            start_time: startTime,
+                            end_time: endTime,
                         },
-                    ]);
-
+                    ])
+                    .select();
+                
                 if (error) {
                     console.error('Error submitting call data:', error);
                 } else {
                     console.log('Call data submitted successfully.');
+                    const dbCallId = insertedData[0].id;
+                    
+                    // Send the database ID to both clients for their review forms
+                    if (callerClient && callerClient.ws.readyState === WebSocket.OPEN) {
+                        callerClient.ws.send(JSON.stringify({ type: 'call_id_assigned', dbCallId }));
+                    }
+                    if (partnerClient && partnerClient.ws.readyState === WebSocket.OPEN) {
+                         partnerClient.ws.send(JSON.stringify({ type: 'call_id_assigned', dbCallId }));
+                    }
+                }
+                
+                // Clean up call status and broadcast
+                if (partnerId) {
+                    ongoingCalls.delete(id);
+                    ongoingCalls.delete(partnerId);
+                }
+                broadcastUserList();
+
+            } else if (data.type === 'submit_review') {
+                const { error } = await supabase
+                    .from('reviews')
+                    .insert([
+                        {
+                            call_id: data.call_id,
+                            reviewed_email: data.reviewed_email,
+                            reviewed_by_email: data.reviewed_by_email,
+                            rating: data.rating,
+                            feedback: data.feedback,
+                        },
+                    ]);
+
+                if (error) {
+                    console.error('Error submitting review:', error);
+                } else {
+                    console.log('Review submitted successfully.');
                 }
             } else {
                 const targetClient = clients.get(data.targetId);
