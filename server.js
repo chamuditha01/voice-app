@@ -1,6 +1,13 @@
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
-const { v4: uuidv4 } = require('uuid');
+
+// Change the import of uuid here
+let uuidv4;
+import('uuid').then(uuidModule => {
+    uuidv4 = uuidModule.v4;
+}).catch(error => {
+    console.error('Failed to load UUID module:', error);
+});
 
 const PORT = process.env.PORT || 8080;
 
