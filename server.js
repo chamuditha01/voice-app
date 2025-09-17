@@ -40,17 +40,6 @@ async function broadcastUserList() {
     });
 }
 
-function findRandomAvailableSpeaker() {
-    const speakers = Array.from(clients.values()).filter(client =>
-        client.role === 'speaker' && !ongoingCalls.has(client.id)
-    );
-    if (speakers.length > 0) {
-        const randomIndex = Math.floor(Math.random() * speakers.length);
-        return speakers[randomIndex];
-    }
-    return null;
-}
-
 wss.on('connection', ws => {
     const id = idCounter++;
     clients.set(id, { ws, id, email: null, role: null });
@@ -61,6 +50,7 @@ wss.on('connection', ws => {
     ws.on('message', async message => {
         try {
             const data = JSON.parse(message);
+            console.log(`Received message of type: ${data.type} from ID: ${id}`);
 
             if (data.type === 'user_info') {
                 const client = clients.get(id);
@@ -70,34 +60,49 @@ wss.on('connection', ws => {
                 }
                 broadcastUserList();
             } else if (data.type === 'call_request') {
-                const speaker = findRandomAvailableSpeaker();
-                if (speaker) {
+                const targetId = data.targetId; // Get the specific target ID from the caller
+                const speaker = clients.get(targetId);
+                const learner = clients.get(id);
+
+                if (speaker && !ongoingCalls.has(speaker.id)) {
                     const tempCallId = uuidv4();
                     
-                    const learner = clients.get(id);
-                    const speakerEmail = speaker.email;
-                    const learnerEmail = learner.email;
-                    
-                    ws.send(JSON.stringify({ type: 'call_accepted', senderId: speaker.id, callId: tempCallId, opponentEmail: speakerEmail }));
-                    speaker.ws.send(JSON.stringify({ type: 'call_request', senderId: id, callId: tempCallId, opponentEmail: learnerEmail }));
-                    
-                    ongoingCalls.set(id, speaker.id);
-                    ongoingCalls.set(speaker.id, id);
+                    // Notify the speaker about the incoming call
+                    speaker.ws.send(JSON.stringify({ 
+                        type: 'call_request', 
+                        senderId: id, 
+                        callId: tempCallId, 
+                        opponentEmail: learner.email 
+                    }));
+
+                    // Note: The learner is NOT immediately sent a `call_accepted` message here.
+                    // This will happen only after the speaker accepts the call.
+                    // The learner will remain in 'Requesting Call...' state until the speaker responds.
+
+                    // Update ongoingCalls only after the call is accepted, not here.
+                    // For now, let's keep it simple and assume `inCall` status is managed by the clients.
                     broadcastUserList();
+
                 } else {
                     ws.send(JSON.stringify({ type: 'no_speaker_available' }));
                 }
             } else if (data.type === 'call_accepted') {
                 const targetClient = clients.get(data.targetId);
                 const senderClient = clients.get(id);
-
+                
                 if (targetClient && targetClient.ws.readyState === WebSocket.OPEN && senderClient) {
-                    data.senderId = id;
-                    delete data.opponentEmail;
-                    targetClient.ws.send(JSON.stringify(data));
+                    // Update the ongoingCalls map for both clients
+                    ongoingCalls.set(id, targetClient.id);
+                    ongoingCalls.set(targetClient.id, id);
+                    broadcastUserList();
                     
+                    // Notify both clients that the call is accepted and started
                     senderClient.ws.send(JSON.stringify({ type: 'call_started' }));
-                    targetClient.ws.send(JSON.stringify({ type: 'call_started' }));
+                    targetClient.ws.send(JSON.stringify({ 
+                        type: 'call_accepted', 
+                        senderId: id,
+                        opponentEmail: senderClient.email
+                    }));
                 }
             } else if (data.type === 'call_rejected') {
                 const targetClient = clients.get(data.targetId);
@@ -115,7 +120,6 @@ wss.on('connection', ws => {
                 const callerClient = clients.get(id);
                 const partnerClient = clients.get(partnerId);
 
-                // Immediately notify both clients that the call has ended
                 if (callerClient && callerClient.ws.readyState === WebSocket.OPEN) {
                     callerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
                 }
@@ -123,7 +127,6 @@ wss.on('connection', ws => {
                     partnerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
                 }
 
-                // Database submission logic
                 const { learner_email, speaker_email, duration, startTime, endTime } = data;
                 
                 const { data: insertedData, error } = await supabase
@@ -145,7 +148,6 @@ wss.on('connection', ws => {
                     console.log('Call data submitted successfully.');
                     const dbCallId = insertedData[0].id;
                     
-                    // Send the database ID to both clients for their review forms
                     if (callerClient && callerClient.ws.readyState === WebSocket.OPEN) {
                         callerClient.ws.send(JSON.stringify({ type: 'call_id_assigned', dbCallId }));
                     }
@@ -154,7 +156,6 @@ wss.on('connection', ws => {
                     }
                 }
                 
-                // Clean up call status and broadcast
                 if (partnerId) {
                     ongoingCalls.delete(id);
                     ongoingCalls.delete(partnerId);
