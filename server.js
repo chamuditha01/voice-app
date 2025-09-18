@@ -31,6 +31,7 @@ async function broadcastUserList() {
             age: client.age || null,
             bio: client.bio || null,
             imageUrl: client.imageUrl || null,
+            location: client.location || null,
             inCall: ongoingCalls.has(client.id)
         }))
         .filter(user => user.email && user.role);
@@ -48,7 +49,7 @@ async function broadcastUserList() {
 
 wss.on('connection', ws => {
     const id = idCounter++;
-    clients.set(id, { ws, id, email: null, role: null, name: null, age: null, bio: null, imageUrl: null });
+    clients.set(id, { ws, id, email: null, role: null, name: null, age: null, bio: null, imageUrl: null, location: null });
 
     console.log(`New client connected with ID: ${id}`);
     ws.send(JSON.stringify({ type: 'your_id', id: id }));
@@ -67,7 +68,8 @@ wss.on('connection', ws => {
                     client.age = data.age;
                     client.bio = data.bio;
                     client.imageUrl = data.imageUrl;
-                    console.log(`Updated client ${id} info:`, { email: client.email, role: client.role, name: client.name, age: client.age, bio: client.bio, imageUrl: client.imageUrl });
+                    client.location = data.location;
+                    console.log(`Updated client ${id} info:`, { email: client.email, role: client.role, name: client.name, age: client.age, bio: client.bio, imageUrl: client.imageUrl, location: client.location });
                 }
                 broadcastUserList();
             } else if (data.type === 'call_request') {
@@ -88,7 +90,8 @@ wss.on('connection', ws => {
                         opponentName: learner.name,
                         opponentAge: learner.age,
                         opponentBio: learner.bio,
-                        opponentImageUrl: learner.imageUrl
+                        opponentImageUrl: learner.imageUrl,
+                        opponentLocation: learner.location
                     };
                     console.log(`Sending call request to speaker ${targetId}:`, callRequestMessage);
                     speaker.ws.send(JSON.stringify(callRequestMessage));
@@ -116,7 +119,9 @@ wss.on('connection', ws => {
                         opponentName: targetClient.name,
                         opponentAge: targetClient.age,
                         opponentBio: targetClient.bio,
-                        opponentImageUrl: targetClient.imageUrl
+                        opponentImageUrl: targetClient.imageUrl,
+                        opponentLocation: targetClient.location
+
                     };
                     console.log(`Sending call_started to ${id}:`, callStartedMessage);
                     senderClient.ws.send(JSON.stringify(callStartedMessage));
@@ -128,7 +133,8 @@ wss.on('connection', ws => {
                         opponentName: senderClient.name,
                         opponentAge: senderClient.age,
                         opponentBio: senderClient.bio,
-                        opponentImageUrl: senderClient.imageUrl
+                        opponentImageUrl: senderClient.imageUrl,
+                        opponentLocation: senderClient.location
                     };
                     console.log(`Sending call_accepted to ${targetClient.id}:`, callAcceptedMessage);
                     targetClient.ws.send(JSON.stringify(callAcceptedMessage));
@@ -158,9 +164,9 @@ wss.on('connection', ws => {
                     partnerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
                 }
 
-                const { learner_email, speaker_email, duration, startTime, endTime, opponentName, opponentAge, opponentBio, opponentImageUrl } = data;
-                
-                console.log('Submitting call data to Supabase:', { learner_email, speaker_email, duration, startTime, endTime, opponentName, opponentAge, opponentBio, opponentImageUrl });
+                const { learner_email, speaker_email, duration, startTime, endTime, opponentName, opponentAge, opponentBio, opponentImageUrl, opponentLocation } = data;
+
+                console.log('Submitting call data to Supabase:', { learner_email, speaker_email, duration, startTime, endTime, opponentName, opponentAge, opponentBio, opponentImageUrl, opponentLocation });
                 const { data: insertedData, error } = await supabase
                     .from('calls')
                     .insert([
@@ -171,6 +177,7 @@ wss.on('connection', ws => {
                             opponent_age: opponentAge,
                             opponent_bio: opponentBio,
                             opponent_image_url: opponentImageUrl,
+                            opponent_location: opponentLocation,
                             duration_seconds: duration,
                             start_time: startTime,
                             end_time: endTime,
