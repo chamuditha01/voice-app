@@ -1,13 +1,6 @@
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
-
-// Change the import of uuid here
-let uuidv4;
-import('uuid').then(uuidModule => {
-    uuidv4 = uuidModule.v4;
-}).catch(error => {
-    console.error('Failed to load UUID module:', error);
-});
+const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 8080;
 
@@ -81,7 +74,6 @@ wss.on('connection', ws => {
                 if (speaker && !ongoingCalls.has(speaker.id)) {
                     const tempCallId = uuidv4();
                     
-                    // Notify the speaker about the incoming call with additional data
                     const callRequestMessage = {
                         type: 'call_request',
                         senderId: id,
@@ -95,9 +87,6 @@ wss.on('connection', ws => {
                     };
                     console.log(`Sending call request to speaker ${targetId}:`, callRequestMessage);
                     speaker.ws.send(JSON.stringify(callRequestMessage));
-
-                    // Learner remains in 'Requesting Call...' state until speaker responds
-                    broadcastUserList();
                 } else {
                     console.log(`No available speaker for call request from ${id}`);
                     ws.send(JSON.stringify({ type: 'no_speaker_available' }));
@@ -112,7 +101,6 @@ wss.on('connection', ws => {
                     ongoingCalls.set(targetClient.id, id);
                     broadcastUserList();
                     
-                    // Notify both clients with additional data
                     const callStartedMessage = {
                         type: 'call_started',
                         opponentEmail: targetClient.email,
@@ -121,7 +109,6 @@ wss.on('connection', ws => {
                         opponentBio: targetClient.bio,
                         opponentImageUrl: targetClient.imageUrl,
                         opponentLocation: targetClient.location
-
                     };
                     console.log(`Sending call_started to ${id}:`, callStartedMessage);
                     senderClient.ws.send(JSON.stringify(callStartedMessage));
@@ -141,14 +128,20 @@ wss.on('connection', ws => {
                 }
             } else if (data.type === 'call_rejected') {
                 const targetClient = clients.get(data.targetId);
-                console.log(`Call rejected by ${id} for target ${data.targetId}. Target:`, targetClient);
+                console.log(`Server received 'call_rejected' from client ID: ${id} for target ID: ${data.targetId}.`);
+                
                 if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+                    console.log(`Notifying learner client ID: ${targetClient.id} about the rejection.`);
                     targetClient.ws.send(JSON.stringify({ type: 'call_rejected' }));
+                } else {
+                    console.log(`Learner client ID: ${data.targetId} is not available to be notified.`);
                 }
+                
                 const partnerId = ongoingCalls.get(id);
                 if (partnerId) {
                     ongoingCalls.delete(id);
                     ongoingCalls.delete(partnerId);
+                    console.log(`Cleared ongoing calls for IDs: ${id} and ${partnerId}.`);
                 }
                 broadcastUserList();
             } else if (data.type === 'call_ended') {
@@ -156,11 +149,13 @@ wss.on('connection', ws => {
                 const callerClient = clients.get(id);
                 const partnerClient = clients.get(partnerId);
 
-                console.log(`Call ended by ${id}. Partner ID: ${partnerId}. Caller:`, callerClient, 'Partner:', partnerClient);
+                console.log(`Call ended by client ID: ${id}. Partner ID: ${partnerId}.`);
                 if (callerClient && callerClient.ws.readyState === WebSocket.OPEN) {
+                    console.log(`Notifying caller client ID: ${callerClient.id} about the call end.`);
                     callerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
                 }
                 if (partnerClient && partnerClient.ws.readyState === WebSocket.OPEN) {
+                    console.log(`Notifying partner client ID: ${partnerClient.id} about the call end.`);
                     partnerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
                 }
 
@@ -173,11 +168,6 @@ wss.on('connection', ws => {
                         {
                             learner_email,
                             speaker_email,
-                            opponent_name: opponentName,
-                            opponent_age: opponentAge,
-                            opponent_bio: opponentBio,
-                            opponent_image_url: opponentImageUrl,
-                            opponent_location: opponentLocation,
                             duration_seconds: duration,
                             start_time: startTime,
                             end_time: endTime,
@@ -186,9 +176,9 @@ wss.on('connection', ws => {
                     .select();
                 
                 if (error) {
-                    console.error('Error submitting call data:', error);
+                    console.error('Error submitting call data to Supabase:', error);
                 } else {
-                    console.log('Call data submitted successfully.');
+                    console.log(`Call data submitted successfully. New call ID: ${insertedData[0].id}.`);
                     const dbCallId = insertedData[0].id;
                     
                     if (callerClient && callerClient.ws.readyState === WebSocket.OPEN) {
@@ -202,6 +192,7 @@ wss.on('connection', ws => {
                 if (partnerId) {
                     ongoingCalls.delete(id);
                     ongoingCalls.delete(partnerId);
+                    console.log(`Cleared ongoing calls for IDs: ${id} and ${partnerId}.`);
                 }
                 broadcastUserList();
             } else if (data.type === 'submit_review') {
@@ -210,7 +201,7 @@ wss.on('connection', ws => {
                     .from('reviews')
                     .insert([
                         {
-                            call_id: data.call_id,
+                            
                             reviewed_email: data.reviewed_email,
                             reviewed_by_email: data.reviewed_by_email,
                             rating: data.rating,
