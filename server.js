@@ -1,6 +1,11 @@
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
-const { v4: uuidv4 } = require('uuid');
+let uuidv4;
+import('uuid').then(uuidModule => {
+    uuidv4 = uuidModule.v4;
+}).catch(error => {
+    console.error('Failed to load UUID module:', error);
+});
 
 const PORT = process.env.PORT || 8080;
 
@@ -168,6 +173,11 @@ wss.on('connection', ws => {
                         {
                             learner_email,
                             speaker_email,
+                            opponent_name: opponentName,
+                            opponent_age: opponentAge,
+                            opponent_bio: opponentBio,
+                            opponent_image_url: opponentImageUrl,
+                            opponent_location: opponentLocation,
                             duration_seconds: duration,
                             start_time: startTime,
                             end_time: endTime,
@@ -201,7 +211,7 @@ wss.on('connection', ws => {
                     .from('reviews')
                     .insert([
                         {
-                            
+                            call_id: data.call_id,
                             reviewed_email: data.reviewed_email,
                             reviewed_by_email: data.reviewed_by_email,
                             rating: data.rating,
