@@ -173,11 +173,6 @@ wss.on('connection', ws => {
                         {
                             learner_email,
                             speaker_email,
-                            opponent_name: opponentName,
-                            opponent_age: opponentAge,
-                            opponent_bio: opponentBio,
-                            opponent_image_url: opponentImageUrl,
-                            opponent_location: opponentLocation,
                             duration_seconds: duration,
                             start_time: startTime,
                             end_time: endTime,
