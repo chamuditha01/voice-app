@@ -200,6 +200,14 @@ wss.on('connection', ws => {
                     console.log(`Cleared ongoing calls for IDs: ${id} and ${partnerId}.`);
                 }
                 broadcastUserList();
+            } else if (data.type === 'call_canceled') { // New code to handle call cancellations
+                const targetClient = clients.get(data.targetId);
+                if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+                    console.log(`Notifying speaker client ID: ${targetClient.id} that the call was canceled by the learner.`);
+                    targetClient.ws.send(JSON.stringify({ type: 'call_canceled_notification' }));
+                } else {
+                    console.log(`Speaker client ID: ${data.targetId} is not available to be notified of cancellation.`);
+                }
             } else if (data.type === 'submit_review') {
                 console.log('Submitting review data to Supabase:', data);
                 const { error } = await supabase
