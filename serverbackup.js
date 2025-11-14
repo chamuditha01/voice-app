@@ -7,7 +7,7 @@ import('uuid').then(uuidModule => {
     console.error('Failed to load UUID module:', error);
 });
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
 const supabaseUrl = "https://kzoacsovknswqolrpbeb.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6b2Fjc292a25zd3FvbHJwYmViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczMjA0MjksImV4cCI6MjA3Mjg5NjQyOX0.NKKqML6aHUe4_euUX4x9p6TcTWIfKWeeVn_PQ_pS_o4";
@@ -102,9 +102,8 @@ wss.on('connection', ws => {
                 
                 console.log(`Call accepted by ${id} for target ${data.targetId}. Target:`, targetClient, 'Sender:', senderClient);
                 if (targetClient && targetClient.ws.readyState === WebSocket.OPEN && senderClient) {
-                    // CORRECT WAY
-                    ongoingCalls.set(id, data.targetId);
-                    ongoingCalls.set(data.targetId, id);
+                    ongoingCalls.set(id, targetClient.id);
+                    ongoingCalls.set(targetClient.id, id);
                     broadcastUserList();
                     
                     const callStartedMessage = {
@@ -153,35 +152,15 @@ wss.on('connection', ws => {
             } else if (data.type === 'call_ended') {
                 const partnerId = ongoingCalls.get(id);
                 const callerClient = clients.get(id);
-                 const targetId = data.targetId;
-                 const partnerClient = clients.get(partnerId);
-                 const partnerClient1 = clients.get(targetId);
+                const partnerClient = clients.get(partnerId);
 
-                
-               
-
-                console.log(`Call ended by client ID: ${id}. Partner ID: ${targetId}.`);
                 console.log(`Call ended by client ID: ${id}. Partner ID: ${partnerId}.`);
-
-                if(partnerId === undefined){
-                    console.log(`Notifying partner client ID: ${targetId} about the call end.`);
-                     if (partnerClient1 && partnerClient1.ws.readyState === WebSocket.OPEN) {
-                    console.log(`Notifying partner client ID: ${targetId} about the call end.`);
-                    partnerClient1.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
-                    }
-
-                }
-                else{
-                    console.log(`Notifying partner client ID: ${partnerId} about the call end1.`);
-                     if (partnerClient && partnerClient.ws.readyState === WebSocket.OPEN) {
+               
+                if (partnerClient && partnerClient.ws.readyState === WebSocket.OPEN) {
                     console.log(`Notifying partner client ID: ${partnerClient.id} about the call end.`);
                     partnerClient.ws.send(JSON.stringify({ type: 'call_ended_prompt' }));
                 }
 
-
-                }
-               
-               
                 const { learner_email, speaker_email, duration, startTime, endTime, opponentName, opponentAge, opponentBio, opponentImageUrl, opponentLocation } = data;
 
                 console.log('Submitting call data to Supabase:', { learner_email, speaker_email, duration, startTime, endTime, opponentName, opponentAge, opponentBio, opponentImageUrl, opponentLocation });
