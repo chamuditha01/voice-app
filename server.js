@@ -232,7 +232,7 @@ wss.on('connection', ws => {
                     .from('reviews')
                     .insert([
                         {
-                            call_id: data.call_id,
+                            
                             reviewed_email: data.reviewed_email,
                             reviewed_by_email: data.reviewed_by_email,
                             rating: data.rating,
